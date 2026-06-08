@@ -62,6 +62,28 @@ async function main() {
     throw new Error('Invalid input: must contain projectRoot and batchFiles array');
   }
 
+  // ── Input validation: batchImportData keys MUST match batchFiles paths ──
+  // Catches phantom file paths that would be passed through from misconfigured
+  // dispatch scripts, before they propagate into the graph.
+  if (batchImportData) {
+    const filePaths = new Set(batchFiles.map(f => f.path));
+    const importKeys = Object.keys(batchImportData);
+    const extraKeys = importKeys.filter(k => !filePaths.has(k));
+    if (extraKeys.length > 0) {
+      process.stderr.write(
+        `Warning: extract-structure: input has ${extraKeys.length} ` +
+        `batchImportData keys not in batchFiles — removing orphan entries ` +
+        `(first: ${extraKeys[0]})\n`,
+      );
+      for (const k of extraKeys) delete batchImportData[k];
+    }
+    for (const path of filePaths) {
+      if (!(path in batchImportData)) {
+        batchImportData[path] = [];
+      }
+    }
+  }
+
   // Create tree-sitter plugin with all configs that have WASM grammars
   const tsConfigs = builtinLanguageConfigs.filter(c => c.treeSitter);
   const tsPlugin = new TreeSitterPlugin(tsConfigs);
@@ -83,6 +105,10 @@ async function main() {
     try {
       content = readFileSync(absolutePath, 'utf-8');
     } catch {
+      process.stderr.write(
+        `Warning: extract-structure: ${file.path} — ` +
+        `file not found on disk — skipped (ensure path exists in your working copy)\n`,
+      );
       filesSkipped.push(file.path);
       continue;
     }

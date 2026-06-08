@@ -17,6 +17,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 
 /**
  * Chunk size for parallel file I/O. Bounded so a 15k-file repo doesn't try
@@ -526,6 +527,39 @@ async function main() {
     return { batchIndex: b.batchIndex, files: b.files, batchImportData, neighborMap };
   });
 
+  // ── Validation assertion: batchImportData keys MUST match batch files ──
+  // Prevents downstream dispatch scripts from receiving file paths that do not
+  // exist in the scan result (phantom paths). Orphan importData keys are
+  // removed; missing entries are filled with empty arrays.
+  let validationErrors = 0;
+  for (const b of batches) {
+    const filePaths = new Set(b.files.map(f => f.path));
+    const importKeys = Object.keys(b.batchImportData);
+    // Keys in batchImportData that are NOT in this batch's files
+    const extraKeys = importKeys.filter(k => !filePaths.has(k));
+    if (extraKeys.length > 0) {
+      process.stderr.write(
+        `Warning: compute-batches: batch ${b.batchIndex} has ${extraKeys.length} ` +
+        `batchImportData keys not in batch files — removing orphan entries ` +
+        `(first: ${extraKeys[0]})\n`,
+      );
+      for (const k of extraKeys) delete b.batchImportData[k];
+      validationErrors += extraKeys.length;
+    }
+    // Files without a batchImportData entry — fill with empty array
+    for (const path of filePaths) {
+      if (!(path in b.batchImportData)) {
+        b.batchImportData[path] = [];
+      }
+    }
+  }
+  if (validationErrors > 0) {
+    process.stderr.write(
+      `Info: compute-batches: fixed ${validationErrors} orphan batchImportData entries ` +
+      `across ${batches.length} batches\n`,
+    );
+  }
+
   let finalBatches = batches;
   if (changedFiles) {
     finalBatches = batches.filter(b => b.files.some(f => changedFiles.has(f.path)));
@@ -538,12 +572,27 @@ async function main() {
   // count (unchanged from the input scan) while totalBatches reflects only
   // the filtered set written to disk. batchIndex values on the kept batches
   // preserve the full-graph assignment so neighborMap references resolve.
+  // ── _validation: file set integrity fingerprint ──
+  // Enables downstream consumers (dispatch scripts, extract-structure) to
+  // verify that every path in the batches originates from scan-result.json.
+  const allBatchPaths = [...new Set(
+    finalBatches.flatMap(b => b.files.map(f => f.path)),
+  )].sort();
+  const pathHash = createHash('sha256')
+    .update(allBatchPaths.join('\n'))
+    .digest('hex')
+    .slice(0, 16);
+
   const output = {
     schemaVersion: 1,
     algorithm,
     totalFiles: scan.files.length,
     totalBatches: finalBatches.length,
     exportsByPath: Object.fromEntries(exportsByPath),
+    _validation: {
+      fileCount: allBatchPaths.length,
+      fileSetHash: pathHash,
+    },
     batches: finalBatches,
   };
 
