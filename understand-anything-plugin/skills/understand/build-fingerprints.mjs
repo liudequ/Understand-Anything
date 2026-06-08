@@ -11,11 +11,20 @@
  * for buildFingerprintStore() and never successfully produced a baseline,
  * which silently broke auto-update for every install (see issue #152).
  *
+ * Note: despite the legacy field name `gitCommitHash` in existing persisted
+ * schemas, the value is treated here as an opaque analysis ref string. Git
+ * commits, SVN revisions (`svn:r1234`), or synthetic refs are all accepted.
+ *
  * Usage:
  *   node build-fingerprints.mjs <input.json>
  *
  * Input JSON:
- *   { projectRoot: string, sourceFilePaths: string[], gitCommitHash: string }
+ *   {
+ *     projectRoot: string,
+ *     sourceFilePaths: string[],
+ *     analysisRef?: string,
+ *     gitCommitHash?: string
+ *   }
  *
  * Writes: <projectRoot>/.understand-anything/fingerprints.json
  * Exit code: 0 on success (including 0 files analyzed); non-zero on error.
@@ -59,13 +68,14 @@ async function main() {
     process.exit(1);
   }
 
-  const { projectRoot, sourceFilePaths, gitCommitHash } = JSON.parse(
+  const { projectRoot, sourceFilePaths, analysisRef, gitCommitHash } = JSON.parse(
     readFileSync(inputPath, 'utf-8'),
   );
+  const ref = typeof analysisRef === 'string' ? analysisRef : gitCommitHash;
 
-  if (!projectRoot || !Array.isArray(sourceFilePaths) || typeof gitCommitHash !== 'string') {
+  if (!projectRoot || !Array.isArray(sourceFilePaths) || typeof ref !== 'string') {
     throw new Error(
-      'Invalid input: requires { projectRoot: string, sourceFilePaths: string[], gitCommitHash: string }',
+      'Invalid input: requires { projectRoot: string, sourceFilePaths: string[], analysisRef?: string, gitCommitHash?: string }',
     );
   }
 
@@ -80,7 +90,7 @@ async function main() {
   registry.register(tsPlugin);
   registerAllParsers(registry);
 
-  const store = buildFingerprintStore(projectRoot, sourceFilePaths, registry, gitCommitHash);
+  const store = buildFingerprintStore(projectRoot, sourceFilePaths, registry, ref);
   saveFingerprints(projectRoot, store);
 
   const fileCount = Object.keys(store.files).length;

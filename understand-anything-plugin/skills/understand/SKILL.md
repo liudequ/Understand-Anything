@@ -12,7 +12,7 @@ Analyze the current codebase and produce a `knowledge-graph.json` file in `.unde
 
 - `$ARGUMENTS` may contain:
   - `--full` — Force a full rebuild, ignoring any existing graph
-  - `--auto-update` — Enable automatic graph updates on commit (writes `autoUpdate: true` to `.understand-anything/config.json`)
+  - `--auto-update` — Enable automatic graph updates on commit for Git projects only (writes `autoUpdate: true` to `.understand-anything/config.json`; ignore with a warning on SVN / no-VCS projects)
   - `--no-auto-update` — Disable automatic graph updates (writes `autoUpdate: false` to `.understand-anything/config.json`)
   - `--review` — Run full LLM graph-reviewer instead of inline deterministic validation
   - `--language <lang>` — Generate all textual content (summaries, descriptions, tags, titles, languageNotes, languageLesson) in the specified language. Accepts ISO 639-1 codes (`zh`, `ja`, `ko`, `en`, `es`, `fr`, `de`, etc.) or friendly names (`chinese`, `japanese`, `korean`, `english`, `spanish`, etc.). Locale variants supported: `zh-TW`, `zh-HK`, etc. Defaults to `en` (English). Stores preference in `.understand-anything/config.json` for consistency across incremental updates.
@@ -49,7 +49,7 @@ Determine whether to run a full analysis or incremental update.
      - Verify the resolved path exists and is a directory (run `test -d <path>`). If it does not exist or is not a directory, report an error to the user and **STOP**.
      - Set `PROJECT_ROOT` to the resolved absolute path.
    - If no directory path argument is found, set `PROJECT_ROOT` to the current working directory.
-   - **Worktree redirect.** If `PROJECT_ROOT` is inside a git worktree (not the main checkout), redirect output to the main repository root. Worktrees managed by Claude Code are ephemeral — `.understand-anything/` written there is destroyed when the session ends, taking the knowledge graph with it (issue #133). Detect a worktree by comparing `git rev-parse --git-dir` against `git rev-parse --git-common-dir`; in a normal checkout or submodule they resolve to the same path, in a worktree they differ and the parent of `--git-common-dir` is the main repo root.
+   - **Worktree redirect (Git only).** If `git rev-parse --is-inside-work-tree` succeeds and `PROJECT_ROOT` is inside a git worktree (not the main checkout), redirect output to the main repository root. Worktrees managed by Claude Code are ephemeral — `.understand-anything/` written there is destroyed when the session ends, taking the knowledge graph with it (issue #133). Detect a worktree by comparing `git rev-parse --git-dir` against `git rev-parse --git-common-dir`; in a normal checkout or submodule they resolve to the same path, in a worktree they differ and the parent of `--git-common-dir` is the main repo root. If the project is not a Git working tree, skip this step entirely.
 
      ```bash
      COMMON_DIR=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null)
@@ -120,25 +120,41 @@ Determine whether to run a full analysis or incremental update.
 
    If `pnpm` is missing, report to the user: "Install Node.js ≥ 22 and pnpm ≥ 10, then re-run `/understand`."
 
-2. Get the current git commit hash:
-   ```bash
-   git rev-parse HEAD
-   ```
-3. Create the intermediate and temp output directories:
+2. Detect the project VCS type:
+   - If `git rev-parse --is-inside-work-tree` succeeds, set `$VCS_TYPE=git`
+   - Else if `svn info` succeeds, set `$VCS_TYPE=svn`
+   - Else set `$VCS_TYPE=none`
+
+3. Determine the current analysis ref (`$CURRENT_ANALYSIS_REF`):
+   - If `$VCS_TYPE=git`:
+     ```bash
+     git rev-parse HEAD
+     ```
+   - If `$VCS_TYPE=svn`, prefer:
+     ```bash
+     svn info --show-item revision
+     ```
+     If `--show-item` is unavailable, parse `svn info` output for the `Revision:` line instead. Prefix the final value as `svn:r<revision>`.
+   - If `$VCS_TYPE=none`, synthesize a stable-enough opaque ref such as `none:<ISO 8601 timestamp>`.
+
+   **Important:** The persisted metadata field is still named `gitCommitHash` for backward compatibility, but treat it as an opaque analysis-ref string in all VCS modes.
+
+4. Create the intermediate and temp output directories:
    ```bash
    mkdir -p $PROJECT_ROOT/.understand-anything/intermediate
    mkdir -p $PROJECT_ROOT/.understand-anything/tmp
    ```
-3.1. **Purge stale trash dirs.** Phase 7 cleanup `mv`s scratch dirs into `.trash-<timestamp>/` rather than `rm -rf`ing them directly (see issue #301), so that destructive-action gates on hardened hosts don't trip on just-created paths. Reclaim the space here once the trash is older than 7 days — by this point any freshness-window check has long since stopped caring about those dirs:
+4.1. **Purge stale trash dirs.** Phase 7 cleanup `mv`s scratch dirs into `.trash-<timestamp>/` rather than `rm -rf`ing them directly (see issue #301), so that destructive-action gates on hardened hosts don't trip on just-created paths. Reclaim the space here once the trash is older than 7 days — by this point any freshness-window check has long since stopped caring about those dirs:
    ```bash
    find $PROJECT_ROOT/.understand-anything/ -maxdepth 1 -type d -name '.trash-*' -mtime +7 -exec rm -rf {} + 2>/dev/null || true
    ```
-3.5. **Auto-update configuration:**
-    - If `--auto-update` is in `$ARGUMENTS`: write `{"autoUpdate": true}` to `$PROJECT_ROOT/.understand-anything/config.json`
+4.5. **Auto-update configuration:**
+    - If `--auto-update` is in `$ARGUMENTS` **and** `$VCS_TYPE=git`: write `{"autoUpdate": true}` to `$PROJECT_ROOT/.understand-anything/config.json`
+    - If `--auto-update` is in `$ARGUMENTS` **and** `$VCS_TYPE!=git`: tell the user that local post-commit auto-update is Git-only, ignore the flag, and continue the analysis normally
     - If `--no-auto-update` is in `$ARGUMENTS`: write `{"autoUpdate": false}` to `$PROJECT_ROOT/.understand-anything/config.json`
-    - These flags only set the config — analysis proceeds normally regardless.
+    - These flags only affect config; analysis proceeds normally regardless.
 
- 3.6. **Language configuration:**
+ 4.6. **Language configuration:**
     - Parse `$ARGUMENTS` for `--language <lang>` flag. If found, extract the language code.
     - **Language code normalization:** Map friendly names to ISO codes:
       - `chinese` → `zh`, `japanese` → `ja`, `korean` → `ko`, `english` → `en`, `spanish` → `es`, `french` → `fr`, `german` → `de`, `portuguese` → `pt`, `russian` → `ru`, `arabic` → `ar`, etc.

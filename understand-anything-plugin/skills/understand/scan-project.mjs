@@ -642,29 +642,7 @@ function countLines(absPath, posixPath) {
 // Main
 // ---------------------------------------------------------------------------
 
-async function main() {
-  const [, , projectRoot, outputPath] = process.argv;
-  if (!projectRoot || !outputPath) {
-    process.stderr.write(
-      'Usage: node scan-project.mjs <projectRoot> <outputPath>\n',
-    );
-    process.exit(1);
-  }
-
-  if (!existsSync(projectRoot)) {
-    process.stderr.write(
-      `scan-project.mjs failed: projectRoot does not exist: ${projectRoot}\n`,
-    );
-    process.exit(1);
-  }
-  const projectRootStat = statSync(projectRoot);
-  if (!projectRootStat.isDirectory()) {
-    process.stderr.write(
-      `scan-project.mjs failed: projectRoot is not a directory: ${projectRoot}\n`,
-    );
-    process.exit(1);
-  }
-
+export function listProjectFiles(projectRoot) {
   // 1. Enumerate. Either git ls-files or recursive walk.
   const candidates = enumerateFiles(projectRoot);
 
@@ -690,6 +668,39 @@ async function main() {
       filteredByIgnore++;
     }
   }
+
+  kept.sort((a, b) => a.localeCompare(b));
+
+  return {
+    files: kept,
+    filteredByIgnore,
+  };
+}
+
+async function main() {
+  const [, , projectRoot, outputPath] = process.argv;
+  if (!projectRoot || !outputPath) {
+    process.stderr.write(
+      'Usage: node scan-project.mjs <projectRoot> <outputPath>\n',
+    );
+    process.exit(1);
+  }
+
+  if (!existsSync(projectRoot)) {
+    process.stderr.write(
+      `scan-project.mjs failed: projectRoot does not exist: ${projectRoot}\n`,
+    );
+    process.exit(1);
+  }
+  const projectRootStat = statSync(projectRoot);
+  if (!projectRootStat.isDirectory()) {
+    process.stderr.write(
+      `scan-project.mjs failed: projectRoot is not a directory: ${projectRoot}\n`,
+    );
+    process.exit(1);
+  }
+
+  const { files: kept, filteredByIgnore } = listProjectFiles(projectRoot);
 
   // 3. Per-file: language + category + line count.
   //    Drop files that fail line counting (per-file resilience).
