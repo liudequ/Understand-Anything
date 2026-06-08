@@ -1,11 +1,13 @@
 ---
 name: understand-diff
-description: Use when you need to analyze git diffs or pull requests to understand what changed, affected components, and risks
+description: Use when you need to analyze git diffs or pull requests to understand what changed, affected components, and risks. Git-oriented; SVN / no-VCS projects should degrade with a clear notice.
 ---
 
 # /understand-diff
 
 Analyze the current code changes against the knowledge graph at `.understand-anything/knowledge-graph.json`.
+
+**Current limitation:** this command is Git-oriented. If the project is an SVN working copy or has no VCS, do not attempt a fake diff flow — report the limitation clearly and stop.
 
 ## Graph Structure Reference
 
@@ -32,10 +34,24 @@ The knowledge graph JSON has this structure:
 
 1. Check that `.understand-anything/knowledge-graph.json` exists. If not, tell the user to run `/understand` first.
 
-2. **Get the changed files list** (do NOT read the graph yet):
-   - If on a branch with uncommitted changes: `git diff --name-only`
-   - If on a feature branch: `git diff main...HEAD --name-only` (or the base branch)
-   - If the user specifies a PR number: get the diff from that PR
+2. **Detect VCS and get the changed files list** (do NOT read the graph yet):
+   - If `git rev-parse --is-inside-work-tree` succeeds, continue with the Git flow below.
+   - Else if `svn info` succeeds, tell the user:
+     ```
+     /understand-diff currently supports Git-based diff analysis only. This project is an SVN working copy, so automatic diff impact analysis is not available yet.
+     Suggested fallback: run /understand to refresh the graph, then use /understand-chat or /understand-explain for targeted impact exploration.
+     ```
+     Then STOP.
+   - Else (no Git and no SVN), tell the user:
+     ```
+     /understand-diff currently supports Git-based diff analysis only. No supported VCS was detected for this project, so automatic diff impact analysis is not available.
+     Suggested fallback: run /understand to refresh the graph, then use /understand-chat or /understand-explain for targeted impact exploration.
+     ```
+     Then STOP.
+   - Git flow:
+     - If on a branch with uncommitted changes: `git diff --name-only`
+     - If on a feature branch: `git diff main...HEAD --name-only` (or the base branch)
+     - If the user specifies a PR number: get the diff from that PR
 
 3. **Read project metadata only** — use Grep or Read with a line limit to extract just the `"project"` section for context.
 
