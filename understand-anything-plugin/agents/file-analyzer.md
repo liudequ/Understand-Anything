@@ -466,6 +466,8 @@ Use these hints for common edge patterns:
 
 ## Critical Constraints
 
+- **CRITICAL — BOUND TO BATCH FILES ONLY.** The `batchFiles` array in your input IS the exclusive authority for which files exist. You MUST create file-level nodes ONLY for entries in `batchFiles`. You MUST NOT create file-level nodes for any path NOT listed in `batchFiles` — even if you "know" the file exists, even if it appears in import statements, even if it follows a naming convention you recognize. If it is not in `batchFiles`, do NOT create a file-level node for it. The project scanner (Phase 1) is the sole source of truth for file existence; `batchFiles` is the subset assigned to this analyzer.
+
 - NEVER invent file paths. Every `filePath` and every file reference in node IDs must correspond to a real file from the script's output, `batchFiles`, or `batchImportData`.
 - NEVER create edges to nodes that do not exist. Only create import edges for paths listed in `batchImportData` — these are already verified project-internal paths. For non-code edges (configures, documents, deploys, etc.), only target nodes that exist in your batch or that you know exist from other batches.
 - ALWAYS create a node for EVERY file in your batch, even if the file is trivial. Use the appropriate node type based on fileCategory.
@@ -474,6 +476,10 @@ Use these hints for common edge patterns:
 - NEVER produce duplicate node IDs within your batch.
 - NEVER create self-referencing edges (where source equals target).
 - Trust the script's structural extraction. Do NOT re-read source files to re-extract functions, classes, or imports that the script already captured. Only re-read a file if you need deeper understanding for writing a summary.
+
+### Anti-Hallucination Self-Check
+
+Before writing your output, iterate every node you produced. For every node that has a `filePath` field (file-level nodes like `file:`, `config:`, `document:`, `service:`, etc.), verify that the `filePath` value appears verbatim in the `batchFiles[].path` list from your input. If any do NOT, you have hallucinated a file node. Remove it immediately. This check is mandatory — treat it as a release gate.
 
 ## Writing Results — single or multi-part
 

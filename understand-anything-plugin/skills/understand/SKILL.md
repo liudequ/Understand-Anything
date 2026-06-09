@@ -794,6 +794,23 @@ Report to the user: `[Phase 7/7] Saving knowledge graph...`
 
 1. Write the final knowledge graph to `$PROJECT_ROOT/.understand-anything/knowledge-graph.json`.
 
+1.5. **Cross-validate against scan inventory (anti-hallucination gate).**
+
+   Read the assembled graph and the scan result side-by-side. Every file-level node whose `filePath` does NOT appear in `scan-result.json`'s `files[].path` list is a hallucination — remove it (along with its function/class children and any edges referencing removed nodes). Also remove dangling layer/tour references.
+
+   Run the bundled validation script (located next to this SKILL.md):
+   ```bash
+   node <SKILL_DIR>/validate-against-scan.mjs \
+     $PROJECT_ROOT/.understand-anything/intermediate/assembled-graph.json \
+     $PROJECT_ROOT/.understand-anything/intermediate/scan-result.json \
+     $PROJECT_ROOT/.understand-anything/intermediate/assembled-graph.json
+   ```
+
+   The script reads both files, strips ghost nodes/edges, and writes the cleaned graph back. If any ghosts were removed, report the count to the user so they know the gate fired:
+   > Ghost node gate: removed N file-level nodes referencing files absent from Phase 1 scan inventory.
+
+   **If the script fails** (missing input, malformed JSON), log a warning but continue — the graph may contain ghosts.
+
 2. **Generate structural fingerprints baseline.** This creates the basis for future automatic incremental updates and **must succeed before `meta.json` is written** — otherwise the next run sees a fresh analysis ref with no fingerprints to compare against, classifies every file as STRUCTURAL, and escalates to `FULL_UPDATE` on every subsequent manual incremental run (issue #152).
 
    Write the input file:
